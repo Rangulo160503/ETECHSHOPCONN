@@ -1,0 +1,98 @@
+
+body{
+    background-color: white;
+    font-family: 'Poppins', sans-serif;
+
+}
+main{
+    margin-top: 5%;
+    padding-left: 4%;
+    padding-right: 4%;
+    font-family: 'Poppins', sans-serif;
+}
+header{
+    width: 100%;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    position: fixed;
+    top: 0;
+    background-color: #ffffff;
+    z-index: 200;
+}
+.centrar{
+  padding-top: 6%;
+
+}
+
+.img_login{
+    width: 100%;
+}
+
+
+a{
+    text-decoration: none !important;
+ 
+}
+
+.btn-primary{
+    border-color: #002333 !important;
+    background-color: #002333 !important;
+    width: 100%;
+}
+.btn-outline-secondary{
+    border-color: #002333 !important;
+    background-color: #fff !important;
+    width: 100% !important;
+    color:  #002333 !important;
+}
+.btn-secondary{
+    border-color: #39496B !important;
+    background-color: #39496B !important;
+    width: 100%;
+}
+.registro{
+    color: gray !important;
+}
+.terminos{
+    color: #265e97 !important;
+}
+.btn_comprar{
+    width: 25% !important;
+    background-color: #ffffff !important;
+    color: black !important;
+
+}
+.navbar{
+    background-color:  #ffffff !important;
+}
+
+footer {
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: white; 
+    padding:1%;
+}
+@media (max-width: 768px) {
+    footer {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .footer_item {
+        margin: 5px;
+    }
+}
+
+
+.footer_logo {
+    max-width: 100px; 
+}
+
+.footer_item {
+    margin: 20px;
+}
+.metodos_pago{
+width: 250px;
+}
