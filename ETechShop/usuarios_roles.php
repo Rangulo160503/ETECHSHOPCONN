@@ -7,110 +7,104 @@ if (!$conn) {
 }
 
 $mensaje = '';
+$errores = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $usuario = (int)($_POST['id_usuario'] ?? 0);
-    $rol = (int)($_POST['id_rol'] ?? 0);
-    if ($usuario && $rol) {
-        $plsql = 'BEGIN sp_asignar_rol(:p_user, :p_rol); :p_msg := ''Rol asignado''; EXCEPTION WHEN OTHERS THEN :p_msg := SQLERRM; END;';
-        $stmt = oci_parse($conn, $plsql);
-        oci_bind_by_name($stmt, ':p_user', $usuario);
-        oci_bind_by_name($stmt, ':p_rol', $rol);
-        oci_bind_by_name($stmt, ':p_msg', $mensaje, 4000);
-        @oci_execute($stmt, OCI_COMMIT_ON_SUCCESS);
+    $idUsuario = (int)($_POST['id_usuario'] ?? 0);
+
+    if ($idUsuario > 0) {
+        // Usamos el SP_LOGIN_EXITO para resetear intentos y desbloquear
+        $plsql = "BEGIN sp_login_exito(:p_id); END;";
+        $stmt  = oci_parse($conn, $plsql);
+        oci_bind_by_name($stmt, ':p_id', $idUsuario);
+
+        $ok = @oci_execute($stmt, OCI_COMMIT_ON_SUCCESS);
+
+        if ($ok) {
+            $mensaje = 'Usuario desbloqueado correctamente.';
+        } else {
+            $e       = oci_error($stmt);
+            $errores = $e ? htmlentities($e['message'], ENT_QUOTES) : 'No se pudo desbloquear el usuario.';
+        }
+
         oci_free_statement($stmt);
     } else {
-        $mensaje = 'Seleccione usuario y rol.';
+        $errores = 'Usuario inválido.';
     }
 }
 
-// Usuarios con roles
-$usuarios = [];
-$sqlUsuarios = "SELECT u.id, u.nombre, u.apellido, LISTAGG(r.nombre_rol, ', ') WITHIN GROUP (ORDER BY r.nombre_rol) AS roles
-                FROM usuarios u
-                LEFT JOIN usuario_rol ur ON ur.id_usuario = u.id
-                LEFT JOIN rol r ON r.id_rol = ur.id_rol
-                GROUP BY u.id, u.nombre, u.apellido
-                ORDER BY u.nombre";
-$stmtUsr = oci_parse($conn, $sqlUsuarios);
-oci_execute($stmtUsr);
-while (($row = oci_fetch_assoc($stmtUsr)) !== false) {
-    $usuarios[] = $row;
-}
-oci_free_statement($stmtUsr);
 
-// Roles
-$roles = [];
-$stmtRol = oci_parse($conn, "SELECT id_rol, nombre_rol FROM rol ORDER BY nombre_rol");
-oci_execute($stmtRol);
-while (($row = oci_fetch_assoc($stmtRol)) !== false) {
-    $roles[] = $row;
+// Listado de usuarios
+$usuarios = [];
+$sql = "SELECT id, correo, intentos, bloqueado, fch_crea
+        FROM usuarios
+        ORDER BY id";
+$stmt = oci_parse($conn, $sql);
+if (oci_execute($stmt)) {
+    while (($row = oci_fetch_assoc($stmt)) !== false) {
+        $usuarios[] = $row;
+    }
 }
-oci_free_statement($stmtRol);
+oci_free_statement($stmt);
 Desconecta($conn);
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Usuarios y roles</title>
+    <title>Usuarios - Administración</title>
     <link rel="stylesheet" href="css/normalize.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
 <div class="container py-4">
-    <h1 class="mb-3">Administración de roles</h1>
+    <h1 class="mb-3">Usuarios</h1>
 
     <?php if ($mensaje): ?>
-        <div class="alert alert-info"><?= htmlspecialchars($mensaje) ?></div>
+        <div class="alert alert-success"><?= $mensaje ?></div>
+    <?php endif; ?>
+    <?php if ($errores): ?>
+        <div class="alert alert-danger"><?= $errores ?></div>
     <?php endif; ?>
 
-    <h2>Asignar rol</h2>
-    <form method="POST" class="row g-3 mb-4">
-        <div class="col-md-5">
-            <label class="form-label">Usuario</label>
-            <select name="id_usuario" class="form-select" required>
-                <option value="">Seleccione</option>
-                <?php foreach ($usuarios as $u): ?>
-                    <option value="<?= htmlspecialchars($u['ID']) ?>"><?= htmlspecialchars($u['NOMBRE'] . ' ' . $u['APELLIDO']) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Rol</label>
-            <select name="id_rol" class="form-select" required>
-                <option value="">Seleccione</option>
-                <?php foreach ($roles as $r): ?>
-                    <option value="<?= htmlspecialchars($r['ID_ROL']) ?>"><?= htmlspecialchars($r['NOMBRE_ROL']) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-3 align-self-end text-end">
-            <button class="btn btn-primary" type="submit">Asignar</button>
-        </div>
-    </form>
-
-    <h2>Usuarios</h2>
     <div class="table-responsive">
-        <table class="table table-striped">
+        <table class="table table-striped align-middle">
             <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Nombre</th>
-                    <th>Roles</th>
-                </tr>
+            <tr>
+                <th>ID</th>
+                <th>Correo</th>
+                <th>Intentos</th>
+                <th>Bloqueado</th>
+                <th>Creado</th>
+                <th>Acción</th>
+            </tr>
             </thead>
             <tbody>
-                <?php foreach ($usuarios as $u): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($u['ID']) ?></td>
-                        <td><?= htmlspecialchars($u['NOMBRE'] . ' ' . $u['APELLIDO']) ?></td>
-                        <td><?= htmlspecialchars($u['ROLES']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-                <?php if (empty($usuarios)): ?>
-                    <tr><td colspan="3" class="text-center">No hay usuarios registrados.</td></tr>
-                <?php endif; ?>
+            <?php foreach ($usuarios as $u): ?>
+                <tr>
+                    <td><?= htmlspecialchars($u['ID']) ?></td>
+                    <td><?= htmlspecialchars($u['CORREO']) ?></td>
+                    <td><?= htmlspecialchars($u['INTENTOS']) ?></td>
+                    <td><?= htmlspecialchars($u['BLOQUEADO']) ?></td>
+                    <td><?= htmlspecialchars($u['FCH_CREA']) ?></td>
+                    <td>
+                        <?php if ($u['BLOQUEADO'] === 'S'): ?>
+                            <form method="POST" class="d-inline">
+                                <input type="hidden" name="id_usuario"
+                                       value="<?= htmlspecialchars($u['ID']) ?>">
+                                <button class="btn btn-sm btn-warning" type="submit">
+                                    Desbloquear
+                                </button>
+                            </form>
+                        <?php else: ?>
+                            <span class="text-muted">OK</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if (empty($usuarios)): ?>
+                <tr><td colspan="6" class="text-center">No hay usuarios registrados.</td></tr>
+            <?php endif; ?>
             </tbody>
         </table>
     </div>

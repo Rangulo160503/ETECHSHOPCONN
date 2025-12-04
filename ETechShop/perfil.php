@@ -4,22 +4,27 @@ require_once 'DAL/conexion.php';
 
 $mensaje = '';
 $errores = '';
-$usuarioId = isset($_SESSION['usuario_id']) ? (int)$_SESSION['usuario_id'] : null;
-if (!$usuarioId && isset($_SESSION['usuario'])) {
-    $usuarioId = (int)$_SESSION['usuario'];
-}
 
-if (!$usuarioId) {
+// 1. Obtener ID de usuario desde la sesión (única fuente de verdad)
+$usuarioId = isset($_SESSION['usuario_id']) ? (int)$_SESSION['usuario_id'] : 0;
+
+if ($usuarioId <= 0) {
     header('Location: index.php');
     exit;
 }
+
+// 2. Conectar a Oracle
 $conn = getConnection();
 if (!$conn) {
     die('No se pudo conectar a la base de datos.');
 }
+
+// 3. Función para obtener los datos del usuario
 function obtenerUsuario($conn, $id)
 {
-    $sql = 'SELECT id, nombre, apellido, correo, telefono, direccion FROM usuarios WHERE id = :id';
+    $sql = 'SELECT id, correo, contrasena, intentos, bloqueado, fch_crea 
+            FROM usuarios 
+            WHERE id = :id';
     $stmt = oci_parse($conn, $sql);
     oci_bind_by_name($stmt, ':id', $id);
     oci_execute($stmt);
@@ -27,55 +32,60 @@ function obtenerUsuario($conn, $id)
     oci_free_statement($stmt);
     return $data ?: null;
 }
+
+// 4. Procesar cambio de contraseña (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nombre = trim($_POST['nombre'] ?? '');
-    $apellido = trim($_POST['apellido'] ?? '');
-    $correo = trim($_POST['correo'] ?? '');
-    $telefono = trim($_POST['telefono'] ?? '');
-    $direccion = trim($_POST['direccion'] ?? '');
+    $actual = $_POST['contrasena_actual'] ?? '';
+    $nueva  = $_POST['contrasena_nueva'] ?? '';
+    $conf   = $_POST['contrasena_confirma'] ?? '';
 
-      <div class="card-footer text-body-secondary">
-        <a href='cambiarContrasena.php' class='btn btn-primary'>Cambiar Contraseña</a>
-      </div>
-    if ($nombre === '' || $apellido === '' || $correo === '') {
-        $errores = 'Nombre, apellido y correo son obligatorios.';
-    } elseif (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
-        $errores = 'Ingrese un correo válido.';
+    if ($actual === '' || $nueva === '' || $conf === '') {
+        $errores = 'Debe completar todos los campos de contraseña.';
+    } elseif ($nueva !== $conf) {
+        $errores = 'La nueva contraseña y la confirmación no coinciden.';
     } else {
-        $plsql = 'BEGIN sp_actualizar_perfil(:p_id, :p_nombre, :p_apellido, :p_correo, :p_telefono, :p_direccion); END;';
-        $stmt = oci_parse($conn, $plsql);
-        oci_bind_by_name($stmt, ':p_id', $usuarioId);
-        oci_bind_by_name($stmt, ':p_nombre', $nombre, 100);
-        oci_bind_by_name($stmt, ':p_apellido', $apellido, 100);
-        oci_bind_by_name($stmt, ':p_correo', $correo, 255);
-        oci_bind_by_name($stmt, ':p_telefono', $telefono, 50);
-        oci_bind_by_name($stmt, ':p_direccion', $direccion, 400);
+        // Leer hash actual desde BD
+        $sqlHash = 'SELECT contrasena FROM usuarios WHERE id = :id';
+        $stmtHash = oci_parse($conn, $sqlHash);
+        oci_bind_by_name($stmtHash, ':id', $usuarioId);
+        oci_execute($stmtHash);
+        $rowHash = oci_fetch_assoc($stmtHash);
+        oci_free_statement($stmtHash);
 
-        $ok = @oci_execute($stmt, OCI_COMMIT_ON_SUCCESS);
-        if ($ok) {
-            $mensaje = 'Perfil actualizado correctamente.';
+        if (!$rowHash) {
+            $errores = 'No se encontró el usuario en la base de datos.';
         } else {
-            $e = oci_error($stmt);
-            $errores = $e ? htmlentities($e['message'], ENT_QUOTES) : 'Error al actualizar el perfil.';
+            $hashActual = $rowHash['CONTRASENA'];
+
+            // Verificar contraseña actual (bcrypt)
+            if (!password_verify($actual, $hashActual)) {
+                $errores = 'La contraseña actual no es correcta.';
+            } else {
+                // Generar nuevo hash
+                $hashNuevo = password_hash($nueva, PASSWORD_BCRYPT);
+
+                // Llamar SP_CAMBIAR_CONTRASENA(p_id, p_hash_nuevo)
+                $plsql = 'BEGIN sp_cambiar_contrasena(:p_id, :p_hash_nuevo); END;';
+                $stmt = oci_parse($conn, $plsql);
+                oci_bind_by_name($stmt, ':p_id', $usuarioId);
+                oci_bind_by_name($stmt, ':p_hash_nuevo', $hashNuevo, 255);
+
+                $ok = @oci_execute($stmt, OCI_COMMIT_ON_SUCCESS);
+                if ($ok) {
+                    $mensaje = 'Contraseña actualizada correctamente.';
+                } else {
+                    $e = oci_error($stmt);
+                    $errores = $e ? htmlentities($e['message'], ENT_QUOTES)
+                                  : 'Error al actualizar la contraseña.';
+                }
+                oci_free_statement($stmt);
+            }
         }
-        oci_free_statement($stmt);
     }
 }
 
+// 5. Volver a cargar datos del usuario para pintar la vista
 $usuario = obtenerUsuario($conn, $usuarioId);
-
-$auditSql = 'SELECT campo_modificado, valor_anterior, valor_nuevo, fecha_cambio, usuario_evento
-             FROM auditoria_usuario
-             WHERE id_usuario = :id
-             ORDER BY fecha_cambio DESC FETCH FIRST 10 ROWS ONLY';
-$auditStmt = oci_parse($conn, $auditSql);
-oci_bind_by_name($auditStmt, ':id', $usuarioId);
-oci_execute($auditStmt);
-$auditRows = [];
-while (($row = oci_fetch_assoc($auditStmt)) !== false) {
-    $auditRows[] = $row;
-}
-oci_free_statement($auditStmt);
 
 Desconecta($conn);
 ?>
@@ -101,67 +111,40 @@ Desconecta($conn);
     <?php endif; ?>
 
     <?php if ($usuario): ?>
-    <form method="POST" class="card mb-4">
-        <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <label class="form-label">Nombre</label>
-                    <input type="text" name="nombre" class="form-control" value="<?= htmlspecialchars($usuario['NOMBRE'] ?? '') ?>" required>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Apellido</label>
-                    <input type="text" name="apellido" class="form-control" value="<?= htmlspecialchars($usuario['APELLIDO'] ?? '') ?>" required>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Correo</label>
-                    <input type="email" name="correo" class="form-control" value="<?= htmlspecialchars($usuario['CORREO'] ?? '') ?>" required>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Teléfono</label>
-                    <input type="text" name="telefono" class="form-control" value="<?= htmlspecialchars($usuario['TELEFONO'] ?? '') ?>">
-                </div>
-                <div class="col-12">
-                    <label class="form-label">Dirección</label>
-                    <textarea name="direccion" class="form-control" rows="2"><?= htmlspecialchars($usuario['DIRECCION'] ?? '') ?></textarea>
-                </div>
+        <!-- Datos generales del usuario (solo lectura) -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <p><strong>ID:</strong> <?= htmlspecialchars($usuario['ID']) ?></p>
+                <p><strong>Correo:</strong> <?= htmlspecialchars($usuario['CORREO']) ?></p>
+                <p><strong>Intentos fallidos:</strong> <?= htmlspecialchars($usuario['INTENTOS']) ?></p>
+                <p><strong>Bloqueado:</strong> <?= htmlspecialchars($usuario['BLOQUEADO']) ?></p>
+                <p><strong>Fecha de creación:</strong> <?= htmlspecialchars($usuario['FCH_CREA']) ?></p>
             </div>
         </div>
-        <div class="card-footer text-end">
-            <button type="submit" class="btn btn-primary">Guardar cambios</button>
-        </div>
-    </form>
+
+        <!-- Formulario de cambio de contraseña -->
+        <form method="POST" class="card">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Cambiar contraseña</h2>
+                <div class="mb-3">
+                    <label class="form-label">Contraseña actual</label>
+                    <input type="password" name="contrasena_actual" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Nueva contraseña</label>
+                    <input type="password" name="contrasena_nueva" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Confirmar nueva contraseña</label>
+                    <input type="password" name="contrasena_confirma" class="form-control" required>
+                </div>
+            </div>
+            <div class="card-footer text-end">
+                <button type="submit" class="btn btn-primary">Actualizar contraseña</button>
+            </div>
+        </form>
     <?php else: ?>
         <div class="alert alert-warning">No se encontró la información del usuario.</div>
-    <?php endif; ?>
-
-    <h2>Auditoría de perfil</h2>
-    <?php if (count($auditRows) === 0): ?>
-        <p>No hay cambios registrados.</p>
-    <?php else: ?>
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Fecha</th>
-                    <th>Campo</th>
-                    <th>Valor anterior</th>
-                    <th>Valor nuevo</th>
-                    <th>Usuario BD</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($auditRows as $row): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($row['FECHA_CAMBIO']) ?></td>
-                        <td><?= htmlspecialchars($row['CAMPO_MODIFICADO']) ?></td>
-                        <td><?= htmlspecialchars($row['VALOR_ANTERIOR']) ?></td>
-                        <td><?= htmlspecialchars($row['VALOR_NUEVO']) ?></td>
-                        <td><?= htmlspecialchars($row['USUARIO_EVENTO']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
     <?php endif; ?>
 </div>
 </body>

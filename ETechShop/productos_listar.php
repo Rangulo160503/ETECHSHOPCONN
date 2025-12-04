@@ -8,11 +8,12 @@ if (!$conn) {
 
 $mensaje = $_GET['mensaje'] ?? '';
 $productos = [];
-$sql = "SELECT p.codigo, p.nombre, p.detalle, p.precio, p.stock, p.estado, c.nombre AS categoria
-        FROM productos p
-        LEFT JOIN categoria c ON c.id_categoria = p.id_categoria
-        WHERE p.estado = 'A'";
+
+$sql = "SELECT codigo, nombre, detalle, precio, stock, fch_crea
+        FROM productos
+        ORDER BY codigo";
 $stmt = oci_parse($conn, $sql);
+
 if (oci_execute($stmt)) {
     while (($row = oci_fetch_assoc($stmt)) !== false) {
         $productos[] = $row;
@@ -20,6 +21,7 @@ if (oci_execute($stmt)) {
 } else {
     $mensaje = 'No se pudieron obtener los productos.';
 }
+
 oci_free_statement($stmt);
 Desconecta($conn);
 ?>
@@ -45,34 +47,39 @@ Desconecta($conn);
     <div class="table-responsive">
         <table class="table table-striped">
             <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Nombre</th>
-                    <th>Categoría</th>
-                    <th>Precio</th>
-                    <th>Stock</th>
-                    <th>Estado</th>
-                    <th>Acciones</th>
-                </tr>
+            <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Detalle</th>
+                <th>Precio</th>
+                <th>Stock</th>
+                <th>Creado</th>
+                <th>Acciones</th>
+            </tr>
             </thead>
             <tbody>
-                <?php foreach ($productos as $p): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($p['CODIGO']) ?></td>
-                        <td><?= htmlspecialchars($p['NOMBRE']) ?></td>
-                        <td><?= htmlspecialchars($p['CATEGORIA']) ?></td>
-                        <td><?= htmlspecialchars($p['PRECIO']) ?></td>
-                        <td><?= htmlspecialchars($p['STOCK']) ?></td>
-                        <td><?= htmlspecialchars($p['ESTADO']) ?></td>
-                        <td>
-                            <a class="btn btn-sm btn-secondary" href="productos_form.php?id=<?= urlencode($p['CODIGO']) ?>">Editar</a>
-                            <a class="btn btn-sm btn-danger" href="productos_eliminar.php?id=<?= urlencode($p['CODIGO']) ?>" onclick="return confirm('¿Desea inactivar este producto?');">Eliminar</a>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                <?php if (empty($productos)): ?>
-                    <tr><td colspan="7" class="text-center">No hay productos activos.</td></tr>
-                <?php endif; ?>
+            <?php foreach ($productos as $p): ?>
+                <tr>
+                    <td><?= htmlspecialchars($p['CODIGO']) ?></td>
+                    <td><?= htmlspecialchars($p['NOMBRE']) ?></td>
+                    <td><?= htmlspecialchars($p['DETALLE']) ?></td>
+                    <td><?= htmlspecialchars($p['PRECIO']) ?></td>
+                    <td><?= htmlspecialchars($p['STOCK']) ?></td>
+                    <td><?= htmlspecialchars($p['FCH_CREA']) ?></td>
+                    <td>
+                        <a class="btn btn-sm btn-secondary"
+                           href="productos_form.php?id=<?= urlencode($p['CODIGO']) ?>">Editar</a>
+                        <a class="btn btn-sm btn-danger"
+                           href="productos_eliminar.php?id=<?= urlencode($p['CODIGO']) ?>"
+                           onclick="return confirm('¿Desea eliminar este producto?');">
+                            Eliminar
+                        </a>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if (empty($productos)): ?>
+                <tr><td colspan="7" class="text-center">No hay productos registrados.</td></tr>
+            <?php endif; ?>
             </tbody>
         </table>
     </div>

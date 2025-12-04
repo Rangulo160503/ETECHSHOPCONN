@@ -21,4 +21,10 @@ function Desconecta($conexion) {
         oci_close($conexion);
     }
 }
+
+/* 🔹 Alias para el código nuevo */
+function getConnection() {
+    return Conecta();
+}
+
 ?>
